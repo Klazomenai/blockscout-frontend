@@ -7,6 +7,8 @@
     "ignorePaths": [
         "**/*.svg",
         "**/*.sfd",
+        "**/*.nix",
+        "flake.lock",
         ".git",
         "pnpm-lock.yaml",
         "mocks/zetaChain/zetaChainCCTX.ts",
