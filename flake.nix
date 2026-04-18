@@ -25,7 +25,30 @@
         blockscoutFrontend = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "blockscout-frontend";
           version = "1.0.0";
-          src = ./.;
+
+          # Filter out build artifacts, caches, and the `result` symlink so
+          # untracked files don't bloat the source copy or perturb the
+          # pnpmDeps FOD hash across local checkouts.
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            name = "blockscout-frontend-source";
+            filter =
+              name: type:
+              let
+                baseName = baseNameOf (toString name);
+              in
+              !(
+                (type == "directory"
+                  && (
+                    baseName == "node_modules"
+                    || baseName == ".next"
+                    || baseName == ".devenv"
+                    || baseName == ".direnv"
+                  ))
+                || (type == "symlink" && pkgs.lib.hasPrefix "result" baseName)
+              )
+              && (pkgs.lib.cleanSourceFilter name type);
+          };
 
           # Fetch pnpm dependencies as a fixed-output derivation.
           # To recompute hash: set hash = pkgs.lib.fakeHash, run nix build,
@@ -167,12 +190,12 @@
               cp -r public $out/public
             fi
 
-            # Helper scripts for runtime env var injection (replicate
-            # deploy/scripts/ entrypoint behaviour at runtime, not build time)
-            if [ -d deploy/scripts ]; then
-              mkdir -p $out/deploy
-              cp -r deploy/scripts $out/deploy/
-            fi
+            # Note: deploy/scripts/ is intentionally not shipped. Those
+            # scripts (make_envs_script.sh, download_assets.sh, etc.) carry
+            # shebangs and runtime deps (curl, jq, bash) that would need
+            # patchShebangs + wrapProgram to work on NixOS. The consuming
+            # NixOS service module generates envs.js from a Nix template
+            # string at startup instead, avoiding that runtime closure.
 
             # Create a wrapper script in $out/bin so `nix run` and
             # meta.mainProgram work as expected.

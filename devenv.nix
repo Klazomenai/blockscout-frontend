@@ -16,6 +16,7 @@
     gnumake
     python3
     jq # used by deploy/scripts/build_sprite.sh
+    curl # used by deploy/scripts/download_assets.sh (dev flow)
   ];
 
   enterShell = ''
