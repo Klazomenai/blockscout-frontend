@@ -22,6 +22,35 @@
         nodejs = pkgs.nodejs_22;
         pnpm = pkgs.pnpm_10;
 
+        # Placeholder NEXT_PUBLIC_* values used for both the Next.js build
+        # and the shipped placeholder `envs.js`. Single source of truth so
+        # the two can't drift. Real values are injected at runtime by the
+        # consuming NixOS service module, which regenerates envs.js from
+        # its own configuration (equivalent to upstream's
+        # deploy/scripts/make_envs_script.sh).
+        publicEnv = {
+          NEXT_PUBLIC_API_HOST = "localhost";
+          NEXT_PUBLIC_API_PROTOCOL = "http";
+          NEXT_PUBLIC_API_PORT = "4000";
+          NEXT_PUBLIC_NETWORK_NAME = "Autonity";
+          NEXT_PUBLIC_NETWORK_SHORT_NAME = "ATN";
+          NEXT_PUBLIC_NETWORK_ID = "65000000";
+          NEXT_PUBLIC_NETWORK_RPC_URL = "http://localhost:8545";
+          NEXT_PUBLIC_NETWORK_CURRENCY_NAME = "Auton";
+          NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL = "ATN";
+          NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS = "18";
+          NEXT_PUBLIC_APP_HOST = "localhost";
+          NEXT_PUBLIC_APP_PROTOCOL = "http";
+          NEXT_PUBLIC_APP_PORT = "3000";
+        };
+
+        # Minimal `envs.js` shipped so `nix run` produces a working server
+        # out of the box. `pages/_document.tsx` loads this synchronously;
+        # the browser reads config via `window.__envs` (never `process.env`).
+        placeholderEnvsJs = pkgs.writeText "envs.js" ''
+          window.__envs = ${builtins.toJSON publicEnv};
+        '';
+
         blockscoutFrontend = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "blockscout-frontend";
           version = "1.0.0";
@@ -89,29 +118,16 @@
               "output: 'standalone', typescript: { ignoreBuildErrors: true }, eslint: { ignoreDuringBuilds: true },"
           '';
 
-          # Provide placeholder NEXT_PUBLIC_* values for the build.
-          # Real values are injected at runtime via envs.js (see deploy/scripts/
-          # make_envs_script.sh in upstream — replicated by NixOS service module).
-          env = {
+          # NEXT_PUBLIC_* placeholders come from the shared `publicEnv`
+          # attrset so the shipped envs.js and the Next.js build-time env
+          # stay in lockstep. Real values are injected by the NixOS module
+          # overwriting public/assets/envs.js at service startup.
+          env = publicEnv // {
             NEXT_TELEMETRY_DISABLED = "1";
             # Disable pnpm's "packageManager" version self-install — nixpkgs
             # provides a single pnpm version and we can't fetch from npm in
             # the sandbox. Tolerate minor patch differences.
             npm_config_manage_package_manager_versions = "false";
-            # Disable Next.js build-time validation that requires real values
-            NEXT_PUBLIC_API_HOST = "localhost";
-            NEXT_PUBLIC_API_PROTOCOL = "http";
-            NEXT_PUBLIC_API_PORT = "4000";
-            NEXT_PUBLIC_NETWORK_NAME = "Autonity";
-            NEXT_PUBLIC_NETWORK_SHORT_NAME = "ATN";
-            NEXT_PUBLIC_NETWORK_ID = "65000000";
-            NEXT_PUBLIC_NETWORK_RPC_URL = "http://localhost:8545";
-            NEXT_PUBLIC_NETWORK_CURRENCY_NAME = "Auton";
-            NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL = "ATN";
-            NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS = "18";
-            NEXT_PUBLIC_APP_HOST = "localhost";
-            NEXT_PUBLIC_APP_PROTOCOL = "http";
-            NEXT_PUBLIC_APP_PORT = "3000";
           };
 
           buildPhase = ''
@@ -197,6 +213,14 @@
             # NixOS service module generates envs.js from a Nix template
             # string at startup instead, avoiding that runtime closure.
 
+            # Ship a placeholder envs.js so `nix run` produces a working
+            # server. pages/_document.tsx loads this synchronously; without
+            # it the browser 404s and window.__envs is undefined, breaking
+            # every getEnvValue() call. NixOS service module overwrites
+            # with real values at startup.
+            mkdir -p $out/public/assets
+            cp ${placeholderEnvsJs} $out/public/assets/envs.js
+
             # Create a wrapper script in $out/bin so `nix run` and
             # meta.mainProgram work as expected.
             mkdir -p $out/bin
@@ -219,6 +243,8 @@
             test -d $out/.next/static
             test -f $out/public/icons/sprite.svg
             test -f $out/public/icons/registry.json
+            test -f $out/public/assets/envs.js
+            grep -q 'window.__envs' $out/public/assets/envs.js
             test -f $out/bin/blockscout-frontend
             ${nodejs}/bin/node --check $out/server.js
           '';
