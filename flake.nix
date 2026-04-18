@@ -12,7 +12,9 @@
       nixpkgs,
       flake-utils,
     }:
-    flake-utils.lib.eachDefaultSystem (
+    # Restricted to Linux: meta.platforms = platforms.linux below, so
+    # Darwin outputs would fail with "unsupported platform".
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -122,20 +124,24 @@
             patchShebangs deploy/scripts/build_sprite.sh
             ./deploy/scripts/build_sprite.sh
 
-            # Verify sprite artifacts were produced
+            # Verify sprite artifacts were produced (registry.json alone can
+            # be created even when the actual sprite generation fails)
             if [ ! -f public/icons/registry.json ]; then
               echo "ERROR: Sprite build did not produce public/icons/registry.json" >&2
+              exit 1
+            fi
+
+            sprite_hash_file="$(find public/icons -maxdepth 1 -type f -name 'sprite.*.svg' | head -n 1)"
+            if [ -z "$sprite_hash_file" ]; then
+              echo "ERROR: Sprite build did not produce public/icons/sprite.*.svg" >&2
               exit 1
             fi
 
             # Preserve unhashed sprite.svg fallback for runtime environments
             # where NEXT_PUBLIC_ICON_SPRITE_HASH is not set (the script
             # renames sprite.svg to sprite.<hash>.svg and deletes the original)
-            if [ -d public/icons ] && [ ! -f public/icons/sprite.svg ]; then
-              sprite_hash_file="$(find public/icons -maxdepth 1 -type f -name 'sprite.*.svg' | head -n 1)"
-              if [ -n "$sprite_hash_file" ]; then
-                cp "$sprite_hash_file" public/icons/sprite.svg
-              fi
+            if [ ! -f public/icons/sprite.svg ]; then
+              cp "$sprite_hash_file" public/icons/sprite.svg
             fi
             # 2. Generate route types from pages/
             pnpm routes:generate
@@ -189,6 +195,9 @@
           installCheckPhase = ''
             test -f $out/server.js
             test -d $out/.next/static
+            test -f $out/public/icons/sprite.svg
+            test -f $out/public/icons/registry.json
+            test -f $out/bin/blockscout-frontend
             ${nodejs}/bin/node --check $out/server.js
           '';
 
