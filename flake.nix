@@ -105,12 +105,11 @@
             # with an empty module so Next.js page data collection succeeds.
             for mjs in $(find node_modules/.pnpm -type f -path '*@ipshipyard+node-datachannel*/dist/esm/lib/node-datachannel.mjs' 2>/dev/null); do
               echo "Stubbing $mjs"
-              cat > "$mjs" <<'STUB'
-            // Nix build stub: native node_datachannel.node not available in
-            // sandbox. NFT IPFS fetching disabled — re-enable by building
-            // the native module with proper WebRTC dependencies.
-            export default {};
-            STUB
+              printf '%s\n' \
+                '// Nix build stub: native node_datachannel.node not available in' \
+                '// sandbox. NFT IPFS fetching disabled — re-enable by building' \
+                '// the native module with proper WebRTC dependencies.' \
+                'export default {};' > "$mjs"
               # Also patch the .cjs variant if present
               cjs="''${mjs%.mjs}.cjs"
               if [ -f "$cjs" ]; then
@@ -204,7 +203,7 @@
           meta = with pkgs.lib; {
             description = "Blockscout frontend - Next.js blockchain explorer UI";
             homepage = "https://github.com/blockscout/frontend";
-            license = licenses.gpl3Plus;
+            license = licenses.gpl3Only;
             mainProgram = "blockscout-frontend";
             platforms = platforms.linux;
           };
