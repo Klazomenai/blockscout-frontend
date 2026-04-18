@@ -45,6 +45,7 @@
             gnumake
             pkg-config
             jq # used by deploy/scripts/build_sprite.sh
+            makeWrapper
           ];
 
           buildInputs = with pkgs; [
@@ -58,11 +59,9 @@
           # transitive Chakra UI version drift between pnpm 10.32.1 (upstream
           # CI) and 10.33.0 (nixpkgs).
           postPatch = ''
-            if [ -f next.config.js ]; then
-              substituteInPlace next.config.js \
-                --replace-warn "output: 'standalone'" \
-                "output: 'standalone', typescript: { ignoreBuildErrors: true }, eslint: { ignoreDuringBuilds: true }"
-            fi
+            substituteInPlace next.config.js \
+              --replace-fail "output: 'standalone'," \
+              "output: 'standalone', typescript: { ignoreBuildErrors: true }, eslint: { ignoreDuringBuilds: true },"
           '';
 
           # Provide placeholder NEXT_PUBLIC_* values for the build.
@@ -118,11 +117,25 @@
             done
 
             # Replicate upstream Dockerfile build steps:
-            # 1. Build SVG sprite (creates icon imports)
-            if [ -f deploy/scripts/build_sprite.sh ]; then
-              chmod +x deploy/scripts/build_sprite.sh
-              patchShebangs deploy/scripts/build_sprite.sh
-              ./deploy/scripts/build_sprite.sh || true
+            # 1. Build SVG sprite (creates icon imports and registry.json)
+            chmod +x deploy/scripts/build_sprite.sh
+            patchShebangs deploy/scripts/build_sprite.sh
+            ./deploy/scripts/build_sprite.sh
+
+            # Verify sprite artifacts were produced
+            if [ ! -f public/icons/registry.json ]; then
+              echo "ERROR: Sprite build did not produce public/icons/registry.json" >&2
+              exit 1
+            fi
+
+            # Preserve unhashed sprite.svg fallback for runtime environments
+            # where NEXT_PUBLIC_ICON_SPRITE_HASH is not set (the script
+            # renames sprite.svg to sprite.<hash>.svg and deletes the original)
+            if [ -d public/icons ] && [ ! -f public/icons/sprite.svg ]; then
+              sprite_hash_file="$(find public/icons -maxdepth 1 -type f -name 'sprite.*.svg' | head -n 1)"
+              if [ -n "$sprite_hash_file" ]; then
+                cp "$sprite_hash_file" public/icons/sprite.svg
+              fi
             fi
             # 2. Generate route types from pages/
             pnpm routes:generate
@@ -156,6 +169,13 @@
               cp -r deploy/scripts $out/deploy/
             fi
 
+            # Create a wrapper script in $out/bin so `nix run` and
+            # meta.mainProgram work as expected.
+            mkdir -p $out/bin
+            makeWrapper ${nodejs}/bin/node $out/bin/blockscout-frontend \
+              --add-flags "$out/server.js" \
+              --set-default PORT "3000"
+
             runHook postInstall
           '';
 
@@ -176,7 +196,7 @@
             description = "Blockscout frontend - Next.js blockchain explorer UI";
             homepage = "https://github.com/blockscout/frontend";
             license = licenses.gpl3Plus;
-            mainProgram = "server.js";
+            mainProgram = "blockscout-frontend";
             platforms = platforms.linux;
           };
         });

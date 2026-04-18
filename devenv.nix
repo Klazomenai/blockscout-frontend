@@ -15,6 +15,7 @@
     git
     gnumake
     python3
+    jq # used by deploy/scripts/build_sprite.sh
   ];
 
   enterShell = ''
