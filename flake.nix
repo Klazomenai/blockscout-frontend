@@ -74,7 +74,11 @@
                     || baseName == ".devenv"
                     || baseName == ".direnv"
                   ))
-                || (type == "symlink" && pkgs.lib.hasPrefix "result" baseName)
+                || (type == "symlink"
+                  && (
+                    baseName == "result"
+                    || pkgs.lib.hasPrefix "result-" baseName
+                  ))
               )
               && (pkgs.lib.cleanSourceFilter name type);
           };
@@ -222,11 +226,24 @@
             cp ${placeholderEnvsJs} $out/public/assets/envs.js
 
             # Create a wrapper script in $out/bin so `nix run` and
-            # meta.mainProgram work as expected.
+            # meta.mainProgram work as expected. Bake publicEnv placeholder
+            # NEXT_PUBLIC_* values as --set-default so the standalone
+            # server's process.env matches the shipped envs.js — getEnvValue
+            # in configs/app/utils.ts reads process.env on the server side
+            # (SSR, API routes) and window.__envs in the browser.
+            # --set-default preserves caller-provided overrides, which is
+            # what the NixOS service module relies on to inject real values.
             mkdir -p $out/bin
             makeWrapper ${nodejs}/bin/node $out/bin/blockscout-frontend \
               --add-flags "$out/server.js" \
-              --set-default PORT "3000"
+              --set-default PORT "3000" \
+              ${
+                builtins.concatStringsSep " \\\n              " (
+                  builtins.map (
+                    name: ''--set-default ${name} "${builtins.getAttr name publicEnv}"''
+                  ) (builtins.attrNames publicEnv)
+                )
+              }
 
             runHook postInstall
           '';
